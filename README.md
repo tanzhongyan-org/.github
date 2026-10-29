@@ -89,7 +89,7 @@ permissions:
   pull-requests: read
 jobs:
   ci:
-    uses: tanzhongyan-org/.github/.github/workflows/ci.yml@WORKFLOW_PIN_SHA # v1
+    uses: tanzhongyan-org/.github/.github/workflows/ci.yml@a68c1b52548af4b3e68345d43c9fbc331ac45dba # v1
     with:
       runtime: t3
       postgres-db: app_db
@@ -127,7 +127,7 @@ permissions:
   actions: read
 jobs:
   codeql:
-    uses: tanzhongyan-org/.github/.github/workflows/codeql.yml@WORKFLOW_PIN_SHA # v1
+    uses: tanzhongyan-org/.github/.github/workflows/codeql.yml@a68c1b52548af4b3e68345d43c9fbc331ac45dba # v1
     with:
       runtime: go
       language: go
@@ -162,7 +162,7 @@ permissions:
   contents: read
 jobs:
   dast:
-    uses: tanzhongyan-org/.github/.github/workflows/dast.yml@WORKFLOW_PIN_SHA # v1
+    uses: tanzhongyan-org/.github/.github/workflows/dast.yml@a68c1b52548af4b3e68345d43c9fbc331ac45dba # v1
     with:
       runtime: go
       tool: zap
@@ -198,7 +198,7 @@ permissions:
 jobs:
   preview:
     if: github.event.deployment_status.state == 'success'
-    uses: tanzhongyan-org/.github/.github/workflows/preview-checks.yml@WORKFLOW_PIN_SHA # v1
+    uses: tanzhongyan-org/.github/.github/workflows/preview-checks.yml@a68c1b52548af4b3e68345d43c9fbc331ac45dba # v1
     with:
       runtime: t3
       preview-url: ${{ github.event.deployment_status.target_url }}
@@ -225,7 +225,7 @@ permissions:
   contents: read
 jobs:
   migrate:
-    uses: tanzhongyan-org/.github/.github/workflows/migrate.yml@WORKFLOW_PIN_SHA # v1
+    uses: tanzhongyan-org/.github/.github/workflows/migrate.yml@a68c1b52548af4b3e68345d43c9fbc331ac45dba # v1
     with:
       runtime: t3
       install-command: bun install --frozen-lockfile
@@ -248,7 +248,7 @@ on:
 permissions: {}
 jobs:
   backup:
-    uses: tanzhongyan-org/.github/.github/workflows/backup.yml@WORKFLOW_PIN_SHA # v1
+    uses: tanzhongyan-org/.github/.github/workflows/backup.yml@a68c1b52548af4b3e68345d43c9fbc331ac45dba # v1
     with:
       bucket: s3://my-bucket/db-backups
       aws-region: ap-southeast-1
@@ -278,7 +278,7 @@ permissions:
   contents: read
 jobs:
   eas:
-    uses: tanzhongyan-org/.github/.github/workflows/eas.yml@WORKFLOW_PIN_SHA # v1
+    uses: tanzhongyan-org/.github/.github/workflows/eas.yml@a68c1b52548af4b3e68345d43c9fbc331ac45dba # v1
     with:
       platform: all
     secrets:
@@ -293,7 +293,7 @@ webhook. The payload carries both `text` (Slack, Telegram) and `content`
 the query string.
 
 ```yaml
-- uses: tanzhongyan-org/.github/.github/actions/notify@WORKFLOW_PIN_SHA # v1
+- uses: tanzhongyan-org/.github/.github/actions/notify@a68c1b52548af4b3e68345d43c9fbc331ac45dba # v1
   with:
     webhook-url: ${{ secrets.NOTIFY_WEBHOOK }}
     message: "Deploy of ${{ github.ref_name }} failed"
