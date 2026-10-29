@@ -1,0 +1,119 @@
+name: setup
+description: Install the template runtime toolchain with caches. Internal to tanzhongyan-org/.github.
+
+inputs:
+  runtime:
+    description: Template runtime. One of t3, ts-backend, python, go, rust.
+    required: true
+  playwright:
+    description: Cache the Playwright browser directory. The caller target still installs browsers.
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Reject an unknown runtime
+      shell: bash
+      env:
+        RUNTIME: ${{ inputs.runtime }}
+      run: |
+        case "$RUNTIME" in
+          t3|ts-backend|python|go|rust) ;;
+          *) echo "::error::Unknown runtime '$RUNTIME'" && exit 1 ;;
+        esac
+
+    - name: Set up Bun
+      if: inputs.runtime == 't3' || inputs.runtime == 'ts-backend'
+      uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      with:
+        bun-version-file: package.json
+
+    - name: Set up Node.js from package.json
+      if: inputs.runtime == 't3' || inputs.runtime == 'ts-backend'
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version-file: package.json
+
+    - name: Set up uv
+      if: inputs.runtime == 'python'
+      uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      with:
+        # renovate: datasource=pypi depName=uv
+        version: "0.13.6"
+        enable-cache: true
+
+    - name: Set up Node.js from .node-version
+      if: inputs.runtime == 'python' || inputs.runtime == 'rust'
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version-file: .node-version
+
+    - name: Set up Go
+      if: inputs.runtime == 'go'
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version-file: go.mod
+
+    - name: Set up Node.js 22 for repo policy checks
+      if: inputs.runtime == 'go'
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: "22"
+
+    - name: Install golangci-lint
+      if: inputs.runtime == 'go'
+      uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+      with:
+        # renovate: datasource=github-releases depName=golangci/golangci-lint
+        version: v2.15.0
+        install-mode: goinstall
+        install-only: true
+
+    - name: Install the Rust toolchain from rust-toolchain.toml
+      if: inputs.runtime == 'rust'
+      shell: bash
+      run: rustup toolchain install
+
+    - name: Cache Rust dependencies
+      if: inputs.runtime == 'rust'
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+    - name: Pin the cargo tool versions
+      if: inputs.runtime == 'rust'
+      shell: bash
+      run: |
+        # renovate: datasource=crate depName=cargo-deny
+        echo "CARGO_DENY_VERSION=0.20.2" >> "$GITHUB_ENV"
+        # renovate: datasource=crate depName=cargo-machete
+        echo "CARGO_MACHETE_VERSION=0.9.2" >> "$GITHUB_ENV"
+
+    - name: Install cargo-deny and cargo-machete
+      if: inputs.runtime == 'rust'
+      uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+      with:
+        tool: cargo-deny@${{ env.CARGO_DENY_VERSION }},cargo-machete@${{ env.CARGO_MACHETE_VERSION }}
+
+    - name: Cache the Bun install cache
+      if: inputs.runtime == 't3' || inputs.runtime == 'ts-backend'
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ~/.bun/install/cache
+        key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+        restore-keys: bun-${{ runner.os }}-
+
+    - name: Cache the Next.js build cache
+      if: inputs.runtime == 't3'
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: .next/cache
+        key: next-${{ runner.os }}-${{ hashFiles('bun.lock') }}-${{ hashFiles('**.[jt]s', '**.[jt]sx') }}
+        restore-keys: next-${{ runner.os }}-
+
+    - name: Cache the Playwright browsers
+      if: inputs.playwright == 'true'
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock', 'package-lock.json') }}
+        restore-keys: playwright-${{ runner.os }}-

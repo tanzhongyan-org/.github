@@ -1,0 +1,21 @@
+name: notify
+description: Post a message to a Discord, Slack or Telegram webhook URL.
+
+inputs:
+  webhook-url:
+    description: Incoming webhook URL, or a Telegram sendMessage URL with chat_id in the query.
+    required: true
+  message:
+    description: Plain-text message. Both the text and content fields carry it.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        WEBHOOK_URL: ${{ inputs.webhook-url }}
+        MESSAGE: ${{ inputs.message }}
+      run: |
+        payload=$(jq -n --arg m "$MESSAGE" '{text: $m, content: $m}')
+        curl -sSf -X POST -H 'Content-Type: application/json' -d "$payload" "$WEBHOOK_URL"

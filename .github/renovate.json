@@ -1,0 +1,22 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
+  "minimumReleaseAge": "3 days",
+  "packageRules": [
+    {
+      "description": "Group minor, patch and digest updates into one pull request. No automerge: shared CI reaches every template, so a human merges.",
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "groupName": "non-major dependencies"
+    }
+  ],
+  "customManagers": [
+    {
+      "description": "Update versions annotated with '# renovate: datasource=<ds> depName=<name>' in YAML",
+      "customType": "regex",
+      "managerFilePatterns": ["/\\.ya?ml$/"],
+      "matchStrings": [
+        "#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)(?:\\s+versioning=(?<versioning>\\S+))?(?:\\s+extractVersion=(?<extractVersion>\\S+))?\\s*\\n[^\\n]*?(?::=|=|:)\\s*[\"']?(?<currentValue>[^\\s\"']+)[\"']?"
+      ]
+    }
+  ]
+}
