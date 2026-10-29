@@ -7,6 +7,11 @@
       "description": "Group minor, patch and digest updates into one pull request. No automerge: shared CI reaches every template, so a human merges.",
       "matchUpdateTypes": ["minor", "patch", "digest"],
       "groupName": "non-major dependencies"
+    },
+    {
+      "description": "Hold the Node 22 LTS line across engines, actions, and types",
+      "matchPackageNames": ["node", "@types/node"],
+      "allowedVersions": "<23"
     }
   ],
   "customManagers": [
