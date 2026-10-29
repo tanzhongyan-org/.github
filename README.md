@@ -77,6 +77,9 @@ uses user `postgres`, password `password`; point `database-url` at it.
 
 T3 callers pass `brand-check: true` and `playwright: true`.
 
+Every caller also keeps a local `ci-passed` job: reusable jobs report as
+`ci/<job>`, but the org ruleset requires a check literally named `ci-passed`.
+
 ```yaml
 name: CI
 on:
@@ -89,7 +92,7 @@ permissions:
   pull-requests: read
 jobs:
   ci:
-    uses: tanzhongyan-org/.github/.github/workflows/ci.yml@a68c1b52548af4b3e68345d43c9fbc331ac45dba # v1
+    uses: tanzhongyan-org/.github/.github/workflows/ci.yml@0c54f703d2d0d24b6ec61c8ea0f0d1a7d220f3e9 # v1
     with:
       runtime: t3
       postgres-db: app_db
@@ -98,6 +101,22 @@ jobs:
       db-setup-command: bun run db:push
       brand-check: true
       playwright: true
+  ci-passed:
+    name: ci-passed
+    if: always()
+    needs: [ci]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require the shared CI to succeed or be skipped
+        env:
+          RESULT: ${{ needs.ci.result }}
+        run: |
+          if [ "$RESULT" != "success" ] && [ "$RESULT" != "skipped" ]; then
+            echo "Shared CI finished with: $RESULT"
+            exit 1
+          fi
 ```
 
 ## codeql.yml
@@ -127,7 +146,7 @@ permissions:
   actions: read
 jobs:
   codeql:
-    uses: tanzhongyan-org/.github/.github/workflows/codeql.yml@a68c1b52548af4b3e68345d43c9fbc331ac45dba # v1
+    uses: tanzhongyan-org/.github/.github/workflows/codeql.yml@0c54f703d2d0d24b6ec61c8ea0f0d1a7d220f3e9 # v1
     with:
       runtime: go
       language: go
@@ -149,8 +168,11 @@ its own container version. The workflow backgrounds `start-command` and polls
 | go         | `zap`         | `go mod download`                   | _(none)_           | `make build`    | `./bin/server`  | `http://localhost:8080`, health `/health` |
 | rust       | `zap`         | _(none)_                            | _(none)_           | `cargo build --locked` | `cargo run --locked --quiet` | `http://localhost:8000`, health `/health` |
 
-API templates behind header identity pass the ZAP replacer through
-`zap-cmd-options` (see the Go caller below).
+Do not use the ZAP replacer for identity headers: under ZAP 2.17.0 a
+REQ_HEADER replacer injects a malformed empty-name header (packet-captured),
+and strict parsers answer every request 400. Scan the public surface and cover
+authed routes with E2E or Schemathesis. Tune findings with a `.zap/rules.tsv`
+file passed as `zap-cmd-options: -c /zap/wrk/.zap/rules.tsv`.
 
 ```yaml
 name: DAST
@@ -162,7 +184,7 @@ permissions:
   contents: read
 jobs:
   dast:
-    uses: tanzhongyan-org/.github/.github/workflows/dast.yml@a68c1b52548af4b3e68345d43c9fbc331ac45dba # v1
+    uses: tanzhongyan-org/.github/.github/workflows/dast.yml@0c54f703d2d0d24b6ec61c8ea0f0d1a7d220f3e9 # v1
     with:
       runtime: go
       tool: zap
@@ -173,12 +195,8 @@ jobs:
       install-command: go mod download
       build-command: make build
       start-command: ./bin/server
-      zap-cmd-options: >-
-        -z "-config replacer.full_list(0).description=identity
-        -config replacer.full_list(0).enabled=true
-        -config replacer.full_list(0).matchtype=REQ_HEADER
-        -config replacer.full_list(0).matchstring=x-user-id
-        -config replacer.full_list(0).replacement=zap-scanner"
+      # No identity replacer: it injects a malformed header under ZAP 2.17.0
+      # (see above). The baseline scans the public surface.
 ```
 
 ## preview-checks.yml
@@ -198,7 +216,7 @@ permissions:
 jobs:
   preview:
     if: github.event.deployment_status.state == 'success'
-    uses: tanzhongyan-org/.github/.github/workflows/preview-checks.yml@a68c1b52548af4b3e68345d43c9fbc331ac45dba # v1
+    uses: tanzhongyan-org/.github/.github/workflows/preview-checks.yml@0c54f703d2d0d24b6ec61c8ea0f0d1a7d220f3e9 # v1
     with:
       runtime: t3
       preview-url: ${{ github.event.deployment_status.target_url }}
@@ -225,7 +243,7 @@ permissions:
   contents: read
 jobs:
   migrate:
-    uses: tanzhongyan-org/.github/.github/workflows/migrate.yml@a68c1b52548af4b3e68345d43c9fbc331ac45dba # v1
+    uses: tanzhongyan-org/.github/.github/workflows/migrate.yml@0c54f703d2d0d24b6ec61c8ea0f0d1a7d220f3e9 # v1
     with:
       runtime: t3
       install-command: bun install --frozen-lockfile
@@ -248,7 +266,7 @@ on:
 permissions: {}
 jobs:
   backup:
-    uses: tanzhongyan-org/.github/.github/workflows/backup.yml@a68c1b52548af4b3e68345d43c9fbc331ac45dba # v1
+    uses: tanzhongyan-org/.github/.github/workflows/backup.yml@0c54f703d2d0d24b6ec61c8ea0f0d1a7d220f3e9 # v1
     with:
       bucket: s3://my-bucket/db-backups
       aws-region: ap-southeast-1
@@ -278,7 +296,7 @@ permissions:
   contents: read
 jobs:
   eas:
-    uses: tanzhongyan-org/.github/.github/workflows/eas.yml@a68c1b52548af4b3e68345d43c9fbc331ac45dba # v1
+    uses: tanzhongyan-org/.github/.github/workflows/eas.yml@0c54f703d2d0d24b6ec61c8ea0f0d1a7d220f3e9 # v1
     with:
       platform: all
     secrets:
@@ -293,7 +311,7 @@ webhook. The payload carries both `text` (Slack, Telegram) and `content`
 the query string.
 
 ```yaml
-- uses: tanzhongyan-org/.github/.github/actions/notify@a68c1b52548af4b3e68345d43c9fbc331ac45dba # v1
+- uses: tanzhongyan-org/.github/.github/actions/notify@0c54f703d2d0d24b6ec61c8ea0f0d1a7d220f3e9 # v1
   with:
     webhook-url: ${{ secrets.NOTIFY_WEBHOOK }}
     message: "Deploy of ${{ github.ref_name }} failed"
