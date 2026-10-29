@@ -1,0 +1,236 @@
+name: ci
+
+# Shared fleet CI. Templates call this from a thin caller on push to main and
+# on pull requests; triggers live in the caller, not here.
+on:
+  workflow_call:
+    inputs:
+      runtime:
+        description: Template runtime. One of t3, ts-backend, python, go, rust.
+        required: true
+        type: string
+      postgres-db:
+        description: Database name for the blank Postgres service.
+        required: true
+        type: string
+      database-url:
+        description: DATABASE_URL pointing at the Postgres service.
+        required: true
+        type: string
+      install-command:
+        description: Dependency install step, e.g. bun install --frozen-lockfile. Empty skips.
+        required: false
+        type: string
+        default: ""
+      db-setup-command:
+        description: Blank-DB migration step, e.g. make db-migrate. Empty skips.
+        required: false
+        type: string
+        default: ""
+      playwright:
+        description: Cache the Playwright browser directory.
+        required: false
+        type: boolean
+        default: false
+      brand-check:
+        description: Run make brand-check. T3 callers set this to true.
+        required: false
+        type: boolean
+        default: false
+      run-licenses:
+        description: Run make licenses.
+        required: false
+        type: boolean
+        default: true
+      run-security:
+        description: Run make security.
+        required: false
+        type: boolean
+        default: true
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # renovate: datasource=github-releases depName=gitleaks/gitleaks extractVersion=^v(?<version>.+)$
+  GITLEAKS_VERSION: "8.30.1"
+  # renovate: datasource=pypi depName=zizmor
+  ZIZMOR_VERSION: "1.31.1"
+
+jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      docs-only: ${{ steps.filter.outputs.docs }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - id: filter
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
+        with:
+          predicate-quantifier: every
+          filters: |
+            docs:
+              - '**/*.md'
+              - 'docs/**'
+              - '.github/ISSUE_TEMPLATE/**'
+              - '.github/pull_request_template.md'
+              - '.github/CODEOWNERS'
+
+  gates:
+    name: gates
+    needs: [changes]
+    if: needs.changes.outputs.docs-only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: ${{ inputs.postgres-db }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: ${{ inputs.database-url }}
+      TRUST_IDENTITY_HEADER: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up the toolchain
+        uses: tanzhongyan-org/.github/.github/actions/setup@523bb6f1de6b6f281f5f2fd74e49e719aed1748a # actions-sha
+        with:
+          runtime: ${{ inputs.runtime }}
+          playwright: ${{ inputs.playwright && 'true' || 'false' }}
+
+      - name: Install dependencies
+        if: inputs.install-command != ''
+        env:
+          INSTALL_COMMAND: ${{ inputs.install-command }}
+        run: sh -c "$INSTALL_COMMAND"
+
+      - name: Migrate the blank database
+        if: inputs.db-setup-command != ''
+        env:
+          DB_SETUP_COMMAND: ${{ inputs.db-setup-command }}
+        run: sh -c "$DB_SETUP_COMMAND"
+
+      - name: Run verification gates
+        run: make check
+
+      - name: Check dependency and asset licences
+        if: inputs.run-licenses
+        run: make licenses
+
+      - name: Run the security target
+        if: inputs.run-security
+        run: make security
+
+      - name: Check the brand gate
+        if: inputs.brand-check
+        run: make brand-check
+
+  security:
+    name: security
+    needs: [changes]
+    if: needs.changes.outputs.docs-only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up the toolchain
+        uses: tanzhongyan-org/.github/.github/actions/setup@523bb6f1de6b6f281f5f2fd74e49e719aed1748a # actions-sha
+        with:
+          runtime: ${{ inputs.runtime }}
+
+      - name: Scan history for secrets
+        env:
+          GITLEAKS_VERSION: ${{ env.GITLEAKS_VERSION }}
+        run: |
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          curl -sSfLO "${base}/${archive}"
+          curl -sSfLO "${base}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          grep " ${archive}\$" "gitleaks_${GITLEAKS_VERSION}_checksums.txt" | sha256sum --check --strict -
+          tar -xzf "${archive}" gitleaks
+          ./gitleaks git --redact --no-banner --verbose .
+          rm -f gitleaks "${archive}" "gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+
+      - name: Audit dependencies
+        run: make audit
+
+      - name: Lint workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ZIZMOR_VERSION: ${{ env.ZIZMOR_VERSION }}
+        run: pipx run "zizmor==${ZIZMOR_VERSION}" --min-severity medium .github/workflows
+
+  dependency-review:
+    name: dependency-review
+    needs: [changes]
+    if: github.event_name == 'pull_request' && needs.changes.outputs.docs-only != 'true' && (!github.event.repository.private || vars.ENABLE_CODE_SECURITY == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Probe the Dependency graph
+        id: probe
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/${GITHUB_REPOSITORY}/dependency-graph/sbom" --silent; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Dependency graph is off; enable it in Settings > Code security to run dependency review."
+          fi
+
+      - if: steps.probe.outputs.enabled == 'true'
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+
+  ci-passed:
+    name: ci-passed
+    if: always()
+    needs: [changes, gates, security, dependency-review]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require every job to succeed or be skipped
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: echo "$NEEDS" | jq -e '[.[].result] | all(. == "success" or . == "skipped")'

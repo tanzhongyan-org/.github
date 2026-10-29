@@ -1,0 +1,125 @@
+name: eas
+
+# Mobile builds via EAS. Templates with apps/mobile call this from a thin
+# caller on tags and pull requests; triggers live in the caller, not here.
+# Mode auto resolves to update on PRs, build-submit on tags, and build otherwise.
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Mobile app directory.
+        required: false
+        type: string
+        default: apps/mobile
+      mode:
+        description: One of auto, build, build-submit, update.
+        required: false
+        type: string
+        default: auto
+      platform:
+        description: EAS platform. One of all, ios, android.
+        required: false
+        type: string
+        default: all
+      profile:
+        description: EAS profile. Empty uses the EAS default.
+        required: false
+        type: string
+        default: ""
+      node-version:
+        description: Node.js version for the EAS CLI.
+        required: false
+        type: string
+        default: "22"
+      install-command:
+        description: Dependency install step.
+        required: false
+        type: string
+        default: npm ci
+    secrets:
+      expo-token:
+        description: Expo access token for the EAS CLI.
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # renovate: datasource=npm depName=eas-cli
+  EAS_CLI_VERSION: "27.1.0"
+
+jobs:
+  eas:
+    name: eas
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    env:
+      EXPO_TOKEN: ${{ secrets.expo-token }}
+      CI: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Install the EAS CLI
+        env:
+          EAS_CLI_VERSION: ${{ env.EAS_CLI_VERSION }}
+        run: npm install -g "eas-cli@${EAS_CLI_VERSION}"
+
+      - name: Resolve the mode
+        id: mode
+        env:
+          MODE: ${{ inputs.mode }}
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+        run: |
+          resolved="$MODE"
+          if [ "$resolved" = "auto" ]; then
+            if [ "$EVENT" = "pull_request" ]; then
+              resolved="update"
+            elif [[ "$REF" == refs/tags/* ]]; then
+              resolved="build-submit"
+            else
+              resolved="build"
+            fi
+          fi
+          case "$resolved" in
+            build|build-submit|update) ;;
+            *) echo "::error::Unknown mode '$resolved'" && exit 1 ;;
+          esac
+          echo "resolved=$resolved" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        env:
+          INSTALL_COMMAND: ${{ inputs.install-command }}
+        run: sh -c "$INSTALL_COMMAND"
+
+      - name: Build on EAS
+        if: steps.mode.outputs.resolved == 'build' || steps.mode.outputs.resolved == 'build-submit'
+        env:
+          PLATFORM: ${{ inputs.platform }}
+          PROFILE: ${{ inputs.profile }}
+        run: eas build --platform "$PLATFORM" ${PROFILE:+--profile "$PROFILE"} --non-interactive
+
+      - name: Submit to the stores
+        if: steps.mode.outputs.resolved == 'build-submit'
+        env:
+          PLATFORM: ${{ inputs.platform }}
+          PROFILE: ${{ inputs.profile }}
+        run: eas submit --platform "$PLATFORM" ${PROFILE:+--profile "$PROFILE"} --non-interactive --latest
+
+      - name: Publish an EAS update
+        if: steps.mode.outputs.resolved == 'update'
+        run: eas update --auto --message "CI $GITHUB_SHA"

@@ -1,0 +1,62 @@
+name: codeql
+
+# Shared CodeQL SAST. Templates call this from a thin caller on push to main,
+# on pull requests and weekly; triggers live in the caller, not here.
+on:
+  workflow_call:
+    inputs:
+      runtime:
+        description: Template runtime. One of t3, ts-backend, python, go, rust.
+        required: true
+        type: string
+      language:
+        description: CodeQL language. One of javascript-typescript, python, go, rust.
+        required: true
+        type: string
+      build-mode:
+        description: CodeQL build mode. Go callers use autobuild; the rest use none.
+        required: false
+        type: string
+        default: none
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    if: ${{ !github.event.repository.private || vars.ENABLE_CODE_SECURITY == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ["${{ inputs.language }}", actions]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up the toolchain for autobuild
+        if: inputs.build-mode != 'none'
+        uses: tanzhongyan-org/.github/.github/actions/setup@523bb6f1de6b6f281f5f2fd74e49e719aed1748a # actions-sha
+        with:
+          runtime: ${{ inputs.runtime }}
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.language == 'actions' && 'none' || inputs.build-mode }}
+          queries: security-extended
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: /language:${{ matrix.language }}

@@ -1,0 +1,62 @@
+name: migrate
+
+# Pre-deploy migrations over the direct database URL. Templates call this from
+# a thin caller on push to main, before the deploy step; triggers live in the
+# caller, not here.
+on:
+  workflow_call:
+    inputs:
+      runtime:
+        description: Template runtime. One of t3, ts-backend, python, go, rust.
+        required: true
+        type: string
+      install-command:
+        description: Dependency install step. Empty skips.
+        required: false
+        type: string
+        default: ""
+      migrate-target:
+        description: Make target that applies pending migrations.
+        required: false
+        type: string
+        default: db-migrate
+    secrets:
+      database-url:
+        description: Direct (non-pooled) DATABASE_URL for the migration run.
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: migrate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      DATABASE_URL: ${{ secrets.database-url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up the toolchain
+        uses: tanzhongyan-org/.github/.github/actions/setup@523bb6f1de6b6f281f5f2fd74e49e719aed1748a # actions-sha
+        with:
+          runtime: ${{ inputs.runtime }}
+
+      - name: Install dependencies
+        if: inputs.install-command != ''
+        env:
+          INSTALL_COMMAND: ${{ inputs.install-command }}
+        run: sh -c "$INSTALL_COMMAND"
+
+      - name: Run pending migrations over the direct URL
+        env:
+          TARGET: ${{ inputs.migrate-target }}
+        run: make "$TARGET"

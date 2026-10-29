@@ -1,0 +1,155 @@
+name: dast
+
+# Shared DAST. Templates call this from a thin caller on a weekly schedule and
+# manually; it is not a PR gate. Triggers live in the caller, not here.
+on:
+  workflow_call:
+    inputs:
+      runtime:
+        description: Template runtime. One of t3, ts-backend, python, go, rust.
+        required: true
+        type: string
+      tool:
+        description: Scanner. schemathesis for OpenAPI APIs, zap for the ZAP baseline.
+        required: true
+        type: string
+      postgres-db:
+        description: Database name for the blank Postgres service.
+        required: true
+        type: string
+      database-url:
+        description: DATABASE_URL pointing at the Postgres service.
+        required: true
+        type: string
+      base-url:
+        description: URL the server listens on, e.g. http://localhost:3000.
+        required: true
+        type: string
+      start-command:
+        description: Foreground command that starts the server. The workflow backgrounds it.
+        required: true
+        type: string
+      health-url:
+        description: URL polled until the server answers, e.g. http://localhost:3000/health.
+        required: true
+        type: string
+      install-command:
+        description: Dependency install step. Empty skips.
+        required: false
+        type: string
+        default: ""
+      db-setup-command:
+        description: Blank-DB migration step. Empty skips.
+        required: false
+        type: string
+        default: ""
+      build-command:
+        description: Production build step before the server starts. Empty skips.
+        required: false
+        type: string
+        default: ""
+      zap-cmd-options:
+        description: Extra cmd_options for the ZAP baseline action.
+        required: false
+        type: string
+        default: ""
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # renovate: datasource=docker depName=ghcr.io/zaproxy/zaproxy
+  ZAP_VERSION: "2.17.0"
+
+jobs:
+  scan:
+    name: scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: ${{ inputs.postgres-db }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: ${{ inputs.database-url }}
+      TRUST_IDENTITY_HEADER: "true"
+      BASE_URL: ${{ inputs.base-url }}
+    steps:
+      - name: Reject an unknown DAST tool
+        env:
+          TOOL: ${{ inputs.tool }}
+        run: |
+          case "$TOOL" in
+            schemathesis|zap) ;;
+            *) echo "::error::Unknown DAST tool '$TOOL'" && exit 1 ;;
+          esac
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up the toolchain
+        uses: tanzhongyan-org/.github/.github/actions/setup@523bb6f1de6b6f281f5f2fd74e49e719aed1748a # actions-sha
+        with:
+          runtime: ${{ inputs.runtime }}
+
+      - name: Install dependencies
+        if: inputs.install-command != ''
+        env:
+          INSTALL_COMMAND: ${{ inputs.install-command }}
+        run: sh -c "$INSTALL_COMMAND"
+
+      - name: Migrate the blank database
+        if: inputs.db-setup-command != ''
+        env:
+          DB_SETUP_COMMAND: ${{ inputs.db-setup-command }}
+        run: sh -c "$DB_SETUP_COMMAND"
+
+      - name: Build for production
+        if: inputs.build-command != ''
+        env:
+          BUILD_COMMAND: ${{ inputs.build-command }}
+        run: sh -c "$BUILD_COMMAND"
+
+      - name: Start the server
+        env:
+          START_COMMAND: ${{ inputs.start-command }}
+          HEALTH_URL: ${{ inputs.health-url }}
+        run: |
+          sh -c "$START_COMMAND" > server.log 2>&1 &
+          for _ in $(seq 1 30); do
+            curl -sf "$HEALTH_URL" > /dev/null && exit 0
+            sleep 2
+          done
+          cat server.log
+          exit 1
+
+      - name: Fuzz the API against its OpenAPI document
+        if: inputs.tool == 'schemathesis'
+        run: make dast
+
+      - name: Run the ZAP baseline scan
+        if: inputs.tool == 'zap'
+        uses: zaproxy/action-baseline@de8ad967d3548d44ef623df22cf95c3b0baf8b25 # v0.15.0
+        with:
+          target: ${{ inputs.base-url }}
+          docker_name: ghcr.io/zaproxy/zaproxy:${{ env.ZAP_VERSION }}
+          allow_issue_writing: false
+          fail_action: true
+          artifact_name: zap-baseline-report
+          cmd_options: ${{ inputs.zap-cmd-options }}

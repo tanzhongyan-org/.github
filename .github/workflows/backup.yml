@@ -1,0 +1,77 @@
+name: backup
+
+# Weekly Postgres dump to a private S3 bucket, with notify() on failure.
+# Templates call this from a thin caller on a weekly schedule and manually;
+# triggers live in the caller, not here.
+on:
+  workflow_call:
+    inputs:
+      bucket:
+        description: Destination bucket URL, e.g. s3://my-bucket/db-backups.
+        required: true
+        type: string
+      s3-endpoint:
+        description: Endpoint for S3-compatible stores. Empty uses AWS.
+        required: false
+        type: string
+        default: ""
+      aws-region:
+        description: Region for the S3 upload.
+        required: false
+        type: string
+        default: us-east-1
+      prefix:
+        description: Filename prefix for the dump.
+        required: false
+        type: string
+        default: pg-backup
+    secrets:
+      database-url:
+        description: Direct DATABASE_URL to dump.
+        required: true
+      aws-access-key-id:
+        description: Key with write access to the bucket.
+        required: true
+      aws-secret-access-key:
+        description: Secret with write access to the bucket.
+        required: true
+      notify-webhook:
+        description: Webhook URL for the failure notification.
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: backup
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions: {}
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.aws-access-key-id }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.aws-secret-access-key }}
+      AWS_REGION: ${{ inputs.aws-region }}
+      AWS_ENDPOINT_URL_S3: ${{ inputs.s3-endpoint }}
+      DATABASE_URL: ${{ secrets.database-url }}
+    steps:
+      - name: Dump the database and upload it
+        env:
+          BUCKET: ${{ inputs.bucket }}
+          PREFIX: ${{ inputs.prefix }}
+        run: |
+          stamp=$(date -u +%Y-%m-%dT%H-%M-%SZ)
+          file="${PREFIX}-${stamp}.dump"
+          docker run --rm -v "$PWD:/out" postgres:18-alpine pg_dump "$DATABASE_URL" -Fc -f "/out/${file}"
+          aws s3 cp "$file" "${BUCKET}/${file}"
+          rm -f "$file"
+
+      - name: Notify on failure
+        if: failure()
+        uses: tanzhongyan-org/.github/.github/actions/notify@523bb6f1de6b6f281f5f2fd74e49e719aed1748a # actions-sha
+        with:
+          webhook-url: ${{ secrets.notify-webhook }}
+          message: "Backup failed for ${{ github.repository }} (${{ github.ref_name }}) — see ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

@@ -1,0 +1,132 @@
+name: preview-checks
+
+# Post-deploy preview checks. Templates call this from a thin caller on
+# deployment_status success; triggers live in the caller, not here. Each check
+# is a make target so the Makefile stays the command authority.
+on:
+  workflow_call:
+    inputs:
+      runtime:
+        description: Template runtime. One of t3, ts-backend, python, go, rust.
+        required: true
+        type: string
+      preview-url:
+        description: Deployed preview URL, from deployment_status target_url.
+        required: true
+        type: string
+      install-command:
+        description: Dependency install step. Empty skips.
+        required: false
+        type: string
+        default: ""
+      checks:
+        description: Space-separated checks to run.
+        required: false
+        type: string
+        default: e2e crawl a11y lighthouse static-routes
+      e2e-target:
+        description: Make target for the E2E smoke tests.
+        required: false
+        type: string
+        default: e2e
+      crawl-target:
+        description: Make target for the nav crawler.
+        required: false
+        type: string
+        default: crawl
+      a11y-target:
+        description: Make target for the axe accessibility checks.
+        required: false
+        type: string
+        default: a11y
+      lighthouse-target:
+        description: Make target for the Lighthouse checks.
+        required: false
+        type: string
+        default: lighthouse
+      static-routes-target:
+        description: Make target for the static-route check.
+        required: false
+        type: string
+        default: static-routes
+      bypass-header-name:
+        description: Header carrying the preview protection-bypass secret.
+        required: false
+        type: string
+        default: x-vercel-protection-bypass
+    secrets:
+      preview-bypass:
+        description: Preview protection-bypass secret. Empty runs without a bypass.
+        required: false
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    name: preview
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      PREVIEW_URL: ${{ inputs.preview-url }}
+      PREVIEW_BYPASS: ${{ secrets.preview-bypass }}
+      BYPASS_HEADER_NAME: ${{ inputs.bypass-header-name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up the toolchain
+        uses: tanzhongyan-org/.github/.github/actions/setup@523bb6f1de6b6f281f5f2fd74e49e719aed1748a # actions-sha
+        with:
+          runtime: ${{ inputs.runtime }}
+          playwright: "true"
+
+      - name: Install dependencies
+        if: inputs.install-command != ''
+        env:
+          INSTALL_COMMAND: ${{ inputs.install-command }}
+        run: sh -c "$INSTALL_COMMAND"
+
+      - name: Run the E2E smoke tests
+        if: contains(inputs.checks, 'e2e')
+        env:
+          TARGET: ${{ inputs.e2e-target }}
+        run: make "$TARGET"
+
+      - name: Crawl the navigation
+        if: contains(inputs.checks, 'crawl')
+        env:
+          TARGET: ${{ inputs.crawl-target }}
+        run: make "$TARGET"
+
+      - name: Check accessibility with axe
+        if: contains(inputs.checks, 'a11y')
+        env:
+          TARGET: ${{ inputs.a11y-target }}
+        run: make "$TARGET"
+
+      - name: Check performance with Lighthouse
+        if: contains(inputs.checks, 'lighthouse')
+        env:
+          TARGET: ${{ inputs.lighthouse-target }}
+        run: make "$TARGET"
+
+      - name: Check the static routes
+        if: contains(inputs.checks, 'static-routes')
+        env:
+          TARGET: ${{ inputs.static-routes-target }}
+        run: make "$TARGET"
+
+      - name: Upload the check reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: preview-checks-report
+          path: preview-checks/
+          if-no-files-found: ignore
