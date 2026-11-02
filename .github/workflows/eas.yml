@@ -49,7 +49,7 @@ concurrency:
 
 env:
   # renovate: datasource=npm depName=eas-cli
-  EAS_CLI_VERSION: "27.1.0"
+  EAS_CLI_VERSION: "27.2.0"
 
 jobs:
   eas:
