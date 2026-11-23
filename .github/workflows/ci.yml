@@ -98,7 +98,7 @@ jobs:
       contents: read
     services:
       postgres:
-        image: postgres:18-alpine
+        image: postgres:19-alpine
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: password
