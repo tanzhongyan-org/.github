@@ -37,10 +37,10 @@ runs:
 
     - name: Set up uv
       if: inputs.runtime == 'python'
-      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
       with:
         # renovate: datasource=pypi depName=uv
-        version: "0.13.6"
+        version: "0.13.10"
         enable-cache: true
 
     - name: Set up Node.js from .node-version
@@ -51,7 +51,7 @@ runs:
 
     - name: Set up Go
       if: inputs.runtime == 'go'
-      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
       with:
         go-version-file: go.mod
 
@@ -84,13 +84,13 @@ runs:
       shell: bash
       run: |
         # renovate: datasource=crate depName=cargo-deny
-        echo "CARGO_DENY_VERSION=0.20.2" >> "$GITHUB_ENV"
+        echo "CARGO_DENY_VERSION=0.22.1" >> "$GITHUB_ENV"
         # renovate: datasource=crate depName=cargo-machete
-        echo "CARGO_MACHETE_VERSION=0.9.2" >> "$GITHUB_ENV"
+        echo "CARGO_MACHETE_VERSION=0.10.1" >> "$GITHUB_ENV"
 
     - name: Install cargo-deny and cargo-machete
       if: inputs.runtime == 'rust'
-      uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+      uses: taiki-e/install-action@893d6ee8d714b6c7dfe2bcd94e5759e9a7958a7e # v2.90.10
       with:
         tool: cargo-deny@${{ env.CARGO_DENY_VERSION }},cargo-machete@${{ env.CARGO_MACHETE_VERSION }}
 

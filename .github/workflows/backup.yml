@@ -65,7 +65,7 @@ jobs:
         run: |
           stamp=$(date -u +%Y-%m-%dT%H-%M-%SZ)
           file="${PREFIX}-${stamp}.dump"
-          docker run --rm -v "$PWD:/out" postgres:18-alpine pg_dump "$DATABASE_URL" -Fc -f "/out/${file}"
+          docker run --rm -v "$PWD:/out" postgres:19-alpine pg_dump "$DATABASE_URL" -Fc -f "/out/${file}"
           aws s3 cp "$file" "${BUCKET}/${file}"
           rm -f "$file"
 
