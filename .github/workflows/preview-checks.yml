@@ -82,7 +82,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up the toolchain
-        uses: tanzhongyan-org/.github/.github/actions/setup@dc044cfe0e0960ee47190a92e795bf8c82834afc # actions-sha
+        uses: tanzhongyan-org/.github/.github/actions/setup@f571fa07c95ce7d35173da1fa2ad66ed10103d65 # v1
         with:
           runtime: ${{ inputs.runtime }}
           playwright: "true"
